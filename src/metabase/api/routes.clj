@@ -36,8 +36,7 @@
              [user :as user]
              [util :as util]
              [x-ray :as x-ray]]
-            [metabase.middleware :as middleware]
-            [puppetlabs.i18n.core :refer [tru]]))
+            [metabase.middleware :as middleware]))
 
 (def ^:private +generic-exceptions
   "Wrap ROUTES so any Exception thrown is just returned as a generic 400, to prevent details from leaking in public
@@ -91,4 +90,6 @@
   (context "/tiles"                [] (+auth tiles/routes))
   (context "/user"                 [] (+auth user/routes))
   (context "/util"                 [] util/routes)
-  (route/not-found (constantly {:status 404, :body (tru "API endpoint does not exist.")})))
+  (route/not-found (fn [{:keys [request-method uri]}]
+                     {:status 404
+                      :body   (str (.toUpperCase (name request-method)) " " uri " does not exist.")})))

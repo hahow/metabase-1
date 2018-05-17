@@ -23,9 +23,7 @@
   "Fetch a list of all active `Users` for the admin People page."
   []
   (db/select [User :id :first_name :last_name :email :is_superuser :google_auth :ldap_auth :last_login]
-    :is_active true
-    {:order-by [[:%lower.last_name :asc]
-                [:%lower.first_name :asc]]}))
+    :is_active true))
 
 (defn- reactivate-user! [existing-user first-name last-name]
   (when-not (:is_active existing-user)

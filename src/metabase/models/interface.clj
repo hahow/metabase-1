@@ -7,9 +7,7 @@
              [encryption :as encryption]]
             [schema.core :as s]
             [taoensso.nippy :as nippy]
-            [toucan
-             [models :as models]
-             [util :as toucan-util]])
+            [toucan.models :as models])
   (:import java.sql.Blob))
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
@@ -79,13 +77,6 @@
 (models/add-type! :cron-string
   :in  validate-cron-string
   :out identity)
-
-;; Toucan ships with a Keyword type, but on columns that are marked 'TEXT' it doesn't work properly since the values
-;; might need to get de-CLOB-bered first. So replace the default Toucan `:keyword` implementation with one that
-;; handles those cases.
-(models/add-type! :keyword
-  :in  toucan-util/keyword->qualified-name
-  :out (comp keyword u/jdbc-clob->str))
 
 
 ;;; properties

@@ -2,6 +2,7 @@
 import React, { Component } from "react";
 import PropTypes from "prop-types";
 import { Link } from "react-router";
+import _ from "underscore";
 import { connect } from "react-redux";
 
 import LoadingAndErrorWrapper from "metabase/components/LoadingAndErrorWrapper.jsx";
@@ -29,7 +30,7 @@ export const MODAL_RESET_PASSWORD_EMAIL = "MODAL_RESET_PASSWORD_EMAIL";
 export const MODAL_USER_ADDED_WITH_INVITE = "MODAL_USER_ADDED_WITH_INVITE";
 export const MODAL_USER_ADDED_WITH_PASSWORD = "MODAL_USER_ADDED_WITH_PASSWORD";
 
-import { getSortedUsers, getModal, getGroups } from "../selectors";
+import { getUsers, getModal, getGroups } from "../selectors";
 import {
   createUser,
   deleteUser,
@@ -47,7 +48,7 @@ import {
 
 const mapStateToProps = (state, props) => {
   return {
-    users: getSortedUsers(state, props),
+    users: getUsers(state, props),
     modal: getModal(state, props),
     user: state.currentUser,
     groups: getGroups(state, props),
@@ -400,6 +401,8 @@ export default class PeopleListingApp extends Component {
   render() {
     let { modal, users, groups } = this.props;
     let { error } = this.state;
+
+    users = _.values(users).sort((a, b) => b.date_joined - a.date_joined);
 
     return (
       <LoadingAndErrorWrapper loading={!users} error={error}>

@@ -6,7 +6,6 @@
             [metabase.automagic-dashboards.filters :as magic.filters]
             [metabase.models.card :as card]
             [metabase.query-processor.util :as qp.util]
-            [puppetlabs.i18n.core :as i18n :refer [trs]]
             [toucan.db :as db]))
 
 (def ^Long ^:const grid-width
@@ -253,10 +252,10 @@
                                      ;; Height doesn't need to be precise, just some
                                      ;; safe upper bound.
                                      (make-grid grid-width (* n grid-width))]))]
-     (log/infof (trs "Adding %s cards to dashboard %s:\n%s")
-                (count cards)
-                title
-                (str/join "; " (map :title cards)))
+     (log/info (format "Adding %s cards to dashboard %s:\n%s"
+                       (count cards)
+                       title
+                       (str/join "; " (map :title cards))))
      (cond-> dashboard
        (not-empty filters) (magic.filters/add-filters filters max-filters)))))
 
