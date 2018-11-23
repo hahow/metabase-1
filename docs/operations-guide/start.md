@@ -116,8 +116,10 @@ You can change the application database to use Postgres using a few simple envir
     export MB_DB_HOST=localhost
     java -jar metabase.jar
 
-This will tell Metabase to look for its application database using the supplied Postgres connection information.
+This will tell Metabase to look for its application database using the supplied Postgres connection information. Metabase also supports providing a full JDBC connection URI if you have additional parameters:
 
+    export MB_DB_CONNECTION_URI="postgres://localhost:5432/metabase?user=<username>&password=<password>"
+    java -jar metabase.jar
 
 #### [MySQL](http://www.mysql.com/)
 If you prefer to use MySQL we've got you covered.  You can change the application database to use MySQL using these environment variables. For example:
@@ -130,7 +132,10 @@ If you prefer to use MySQL we've got you covered.  You can change the applicatio
     export MB_DB_HOST=localhost
     java -jar metabase.jar
 
-This will tell Metabase to look for its application database using the supplied MySQL connection information.
+This will tell Metabase to look for its application database using the supplied MySQL connection information. Metabase also supports providing a full JDBC connection URI if you have additional parameters:
+
+    export MB_DB_CONNECTION_URI="mysql://localhost:3306/metabase?user=<username>&password=<password>"
+    java -jar metabase.jar
 
 
 # Migrating from using the H2 database to MySQL or Postgres
@@ -335,15 +340,7 @@ Diagnosing performance related issues can be a challenge. Luckily the JVM ships 
 
 # Java Versions
 
-Metabase will run on Java version 7 or greater, but Java 8 is the easiest and most common chioce. Java 7 was End of Life'd by Oracle in April of 2015 and as such, *Metabase support for Java 7 has been deprecated*. Users are encouraged to upgrade to Java 8 as we will drop support for Java 7 in a future release. For more information on installing/upgrading a Windows or macOS system, see the [Oracle installation instructions](https://docs.oracle.com/javase/8/docs/technotes/guides/install/install_overview.html). Linux users likely find OpenJDK easier to install/upgrade, more information is available on [the OpenJDK install page](http://openjdk.java.net/install/).
-
-## Running on Java 7
-
-Running Metabase on Java version 7 requires additional arguments to the Java invocation:
-
-    java -XX:+CMSClassUnloadingEnabled -XX:+UseConcMarkSweepGC -XX:MaxPermSize=256m -jar metabase.jar
-
-Note that these extra arguments are not required on Java 8. *Support for Java 7 has been deprecated and users are encouraged to upgrade*.
+Metabase will run on Java version 8 or greater; Java 8 is the easiest and most common choice.
 
 ## Running on Java 8
 
@@ -351,8 +348,25 @@ Running on Java 8 is the easiest path to running Metabase. There are no addition
 
     java -jar metabase.jar
 
-## Running on Java 9
+## Running on Java 9 or Newer
 
-Java version 9 has introduced a new module system that places some additional restrictions on class loading. Metabase (and it's dependencies) still rely on the old behavior. Metabase runs on Java 9, but requires an additional argument to work around these changes in the module system:
+To use Metabase on Java 9 with Oracle, Vertica, SparkSQL, or other drivers that require external dependencies,
+you'll need to tweak the way you launch Metabase.
 
-    java --add-opens=java.base/java.net=ALL-UNNAMED -jar metabase.jar
+Java version 9 has introduced a new module system that places some additional restrictions on class loading. To use
+Metabase drivers that require extra external dependencies, you'll need to include them as part of the classpath at
+launch time. Run Metabase as follows:
+
+```bash
+# Unix
+java -cp metabase.jar:plugins/* metabase.core
+```
+
+On Windows, use a semicolon instead:
+
+```powershell
+# Windows
+java -cp metabase.jar;plugins/* metabase.core
+```
+
+The default Docker images use Java 8 so this step is only needed when running the JAR directly.

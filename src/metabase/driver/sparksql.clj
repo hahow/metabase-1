@@ -15,56 +15,36 @@
              [generic-sql :as sql]
              [hive-like :as hive-like]]
             [metabase.driver.generic-sql.query-processor :as sqlqp]
-            [metabase.query-processor.util :as qputil]
-            [metabase.util.honeysql-extensions :as hx]
-            [puppetlabs.i18n.core :refer [trs]])
+            [metabase.models.field :refer [Field]]
+            [metabase.query-processor
+             [store :as qp.store]
+             [util :as qputil]]
+            [metabase.util
+             [honeysql-extensions :as hx]
+             [i18n :refer [trs tru]]])
   (:import clojure.lang.Reflector
-           java.sql.DriverManager
-           metabase.query_processor.interface.Field))
+           java.sql.DriverManager))
 
 (defrecord SparkSQLDriver []
+  :load-ns true
   clojure.lang.Named
   (getName [_] "Spark SQL"))
 
 
 ;;; ------------------------------------------ Custom HoneySQL Clause Impls ------------------------------------------
 
-(def ^:private source-table-alias "t1")
+(def ^:private source-table-alias
+  "Default alias for all source tables. (Not for source queries; those still use the default SQL QP alias of `source`.)"
+  "t1")
 
-(defn- resolve-table-alias [{:keys [schema-name table-name special-type field-name] :as field}]
-  (let [source-table (or (get-in sqlqp/*query* [:query :source-table])
-                         (get-in sqlqp/*query* [:query :source-query :source-table]))]
-    (if (and (= schema-name (:schema source-table))
-             (= table-name (:name source-table)))
-      (-> (assoc field :schema-name nil)
-          (assoc :table-name source-table-alias))
-      (if-let [matching-join-table (->> (get-in sqlqp/*query* [:query :join-tables])
-                                        (filter #(and (= schema-name (:schema %))
-                                                      (= table-name (:table-name %))))
-                                        first)]
-        (-> (assoc field :schema-name nil)
-            (assoc :table-name (:join-alias matching-join-table)))
-        field))))
-
-(defmethod  sqlqp/->honeysql [SparkSQLDriver Field]
-  [driver field-before-aliasing]
-  (let [{:keys [schema-name table-name special-type field-name]} (resolve-table-alias field-before-aliasing)
-        field (keyword (hx/qualify-and-escape-dots schema-name table-name field-name))]
-    (cond
-      (isa? special-type :type/UNIXTimestampSeconds)      (sql/unix-timestamp->timestamp driver field :seconds)
-      (isa? special-type :type/UNIXTimestampMilliseconds) (sql/unix-timestamp->timestamp driver field :milliseconds)
-      :else                                               field)))
-
-(defn- apply-join-tables
-  [honeysql-form {join-tables :join-tables, {source-table-name :name, source-schema :schema} :source-table}]
-  (loop [honeysql-form honeysql-form, [{:keys [table-name pk-field source-field schema join-alias]} & more] join-tables]
-    (let [honeysql-form (h/merge-left-join honeysql-form
-                          [(hx/qualify-and-escape-dots schema table-name) (keyword join-alias)]
-                          [:= (hx/qualify-and-escape-dots source-table-alias (:field-name source-field))
-                              (hx/qualify-and-escape-dots join-alias         (:field-name pk-field))])]
-      (if (seq more)
-        (recur honeysql-form more)
-        honeysql-form))))
+(defmethod sqlqp/->honeysql [SparkSQLDriver (class Field)]
+  [driver field]
+  (let [table            (qp.store/table (:table_id field))
+        table-name       (if (:alias? table)
+                           (:name table)
+                           source-table-alias)
+        field-identifier (keyword (hx/qualify-and-escape-dots table-name (:name field)))]
+    (sqlqp/cast-unix-timestamp-field-if-needed driver field field-identifier)))
 
 (defn- apply-page-using-row-number-for-offset
   "Apply `page` clause to HONEYSQL-FROM, using row_number() for drivers that do not support offsets"
@@ -84,9 +64,9 @@
             (h/limit items))))))
 
 (defn- apply-source-table
-  [honeysql-form {{table-name :name, schema :schema} :source-table}]
-  {:pre [table-name]}
-  (h/from honeysql-form [(hx/qualify-and-escape-dots schema table-name) source-table-alias]))
+  [honeysql-form {source-table-id :source-table}]
+  (let [{table-name :name, schema :schema} (qp.store/table source-table-id)]
+    (h/from honeysql-form [(hx/qualify-and-escape-dots schema table-name) source-table-alias])))
 
 
 ;;; ------------------------------------------- Other Driver Method Impls --------------------------------------------
@@ -116,28 +96,28 @@
     (s/replace s #"-" "_")))
 
 ;; workaround for SPARK-9686 Spark Thrift server doesn't return correct JDBC metadata
-(defn- describe-database [driver {:keys [details] :as database}]
+(defn- describe-database [_ {:keys [details] :as database}]
   {:tables (with-open [conn (jdbc/get-connection (sql/db->jdbc-connection-spec database))]
              (set (for [result (jdbc/query {:connection conn}
-                                 ["show tables"])]
-                    {:name (:tablename result)
+                                           ["show tables"])]
+                    {:name   (:tablename result)
                      :schema (when (> (count (:database result)) 0)
                                (:database result))})))})
 
 ;; workaround for SPARK-9686 Spark Thrift server doesn't return correct JDBC metadata
-(defn- describe-table [driver {:keys [details] :as database} table]
+(defn- describe-table [_ {:keys [details] :as database} table]
   (with-open [conn (jdbc/get-connection (sql/db->jdbc-connection-spec database))]
-    {:name (:name table)
+    {:name   (:name table)
      :schema (:schema table)
      :fields (set (for [result (jdbc/query {:connection conn}
-                                 [(if (:schema table)
-                                    (format "describe `%s`.`%s`"
-                                            (dash-to-underscore (:schema table))
-                                            (dash-to-underscore (:name table)))
-                                    (str "describe " (dash-to-underscore (:name table))))])]
-                    {:name (:col_name result)
+                                           [(if (:schema table)
+                                              (format "describe `%s`.`%s`"
+                                                      (dash-to-underscore (:schema table))
+                                                      (dash-to-underscore (:name table)))
+                                              (str "describe " (dash-to-underscore (:name table))))])]
+                    {:name          (:col_name result)
                      :database-type (:data_type result)
-                     :base-type (hive-like/column->base-type (keyword (:data_type result)))}))}))
+                     :base-type     (hive-like/column->base-type (keyword (:data_type result)))}))}))
 
 ;; we need this because transactions are not supported in Hive 1.2.1
 ;; bound variables are not supported in Spark SQL (maybe not Hive either, haven't checked)
@@ -162,26 +142,14 @@
           :describe-database  describe-database
           :describe-table     describe-table
           :describe-table-fks (constantly #{})
-          :details-fields     (constantly [{:name         "host"
-                                            :display-name "Host"
-                                            :default      "localhost"}
-                                           {:name         "port"
-                                            :display-name "Port"
-                                            :type         :integer
-                                            :default      10000}
-                                           {:name         "dbname"
-                                            :display-name "Database name"
-                                            :placeholder  "default"}
-                                           {:name         "user"
-                                            :display-name "Database username"
-                                            :placeholder  "What username do you use to login to the database?"}
-                                           {:name         "password"
-                                            :display-name "Database password"
-                                            :type         :password
-                                            :placeholder  "*******"}
-                                           {:name         "jdbc-flags"
-                                            :display-name "Additional JDBC settings, appended to the connection string"
-                                            :placeholder  ";transportMode=http"}])
+          :details-fields     (constantly [driver/default-host-details
+                                           (assoc driver/default-port-details :default 10000)
+                                           (assoc driver/default-dbname-details :placeholder (tru "default"))
+                                           driver/default-user-details
+                                           driver/default-password-details
+                                           (assoc driver/default-additional-options-details
+                                             :name        "jdbc-flags"
+                                             :placeholder ";transportMode=http")])
           :execute-query      execute-query
           :features           (constantly (set/union #{:basic-aggregations
                                                        :binning
@@ -198,7 +166,6 @@
   (merge (sql/ISQLDriverDefaultsMixin)
          {:apply-page                (u/drop-first-arg apply-page-using-row-number-for-offset)
           :apply-source-table        (u/drop-first-arg apply-source-table)
-          :apply-join-tables         (u/drop-first-arg apply-join-tables)
           :column->base-type         (u/drop-first-arg hive-like/column->base-type)
           :connection-details->spec  (u/drop-first-arg connection-details->spec)
           :date                      (u/drop-first-arg hive-like/date)

@@ -1,26 +1,21 @@
 (ns metabase.api.dataset
   "/api/dataset endpoints."
   (:require [cheshire.core :as json]
-            [clj-time.format :as tformat]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
             [compojure.core :refer [POST]]
-            [metabase
-             [middleware :as middleware]
-             [query-processor :as qp]
-             [util :as u]]
             [metabase.api.common :as api]
-            [metabase.api.common.internal :refer [route-fn-name]]
             [metabase.models
              [card :refer [Card]]
              [database :as database :refer [Database]]
              [query :as query]]
+            [metabase.query-processor :as qp]
             [metabase.query-processor.util :as qputil]
-            [metabase.util :as util]
             [metabase.util
+             [date :as du]
              [export :as ex]
+             [i18n :refer [trs tru]]
              [schema :as su]]
-            [puppetlabs.i18n.core :refer [trs tru]]
             [schema.core :as s]))
 
 ;;; -------------------------------------------- Running a Query Normally --------------------------------------------
@@ -47,8 +42,10 @@
   (let [source-card-id (query->source-card-id query)]
     (api/cancellable-json-response
      (fn []
-       (qp/process-query-and-save-with-max! query {:executed-by api/*current-user-id*, :context :ad-hoc,
-                                                   :card-id     source-card-id,        :nested? (boolean source-card-id)})))))
+       (qp/process-query-and-save-with-max!
+           query
+           {:executed-by api/*current-user-id*, :context :ad-hoc,
+            :card-id     source-card-id,        :nested? (boolean source-card-id)})))))
 
 
 ;;; ----------------------------------- Downloading Query Results in Other Formats -----------------------------------
@@ -108,7 +105,7 @@
       {:status  200
        :body    ((:export-fn export-conf) columns (maybe-modify-date-values cols rows))
        :headers {"Content-Type"        (str (:content-type export-conf) "; charset=utf-8")
-                 "Content-Disposition" (str "attachment; filename=\"query_result_" (u/date->iso-8601) "." (:ext export-conf) "\"")}}
+                 "Content-Disposition" (str "attachment; filename=\"query_result_" (du/date->iso-8601) "." (:ext export-conf) "\"")}}
       ;; failed query, send error message
       {:status 500
        :body   (:error response)})))
@@ -125,10 +122,13 @@
   [export-format query]
   {query         su/JSONString
    export-format ExportFormat}
-  (let [query (json/parse-string query keyword)]
-    (api/read-check Database (:database query))
+  (let [{:keys [database] :as query} (json/parse-string query keyword)]
+    (when-not (= database database/virtual-id)
+      (api/read-check Database database))
     (as-format export-format
-      (qp/process-query-and-save-execution! (dissoc query :constraints)
+      (qp/process-query-and-save-execution! (-> query
+                                                (dissoc :constraints)
+                                                (assoc-in [:middleware :skip-results-metadata?] true))
         {:executed-by api/*current-user-id*, :context (export-format->context export-format)}))))
 
 

@@ -13,8 +13,16 @@ metrics:
 dimensions:
 - Timestamp:
     field_type: CreationTimestamp
+    score: 100
+- Timestamp:
+    field_type: CreationDate
+    score: 100
 - Timestamp:
     field_type: DateTime
+    score: 90
+- Timestamp:
+    field_type: Date
+    score: 90
 - SourceMedium:
     field_type: UserTable.Source
     max_cardinality: 10
@@ -163,7 +171,7 @@ cards:
     height: 8
 - AvgQuantityBySource:
     group: Financial
-    title: Average qunatity per source
+    title: Average quantity per source
     visualization: table
     dimensions: SourceLarge
     metrics: AvgQuantity

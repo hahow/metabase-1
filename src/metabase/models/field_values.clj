@@ -1,29 +1,30 @@
 (ns metabase.models.field-values
   (:require [clojure.tools.logging :as log]
             [metabase.util :as u]
-            [metabase.util.schema :as su]
-            [puppetlabs.i18n.core :refer [trs]]
+            [metabase.util
+             [i18n :refer [trs]]
+             [schema :as su]]
             [schema.core :as s]
             [toucan
              [db :as db]
              [models :as models]]))
 
-(def ^:const ^Integer category-cardinality-threshold
+(def ^Integer category-cardinality-threshold
   "Fields with less than this many distinct values should automatically be given a special type of `:type/Category`.
   This no longer has any meaning whatsoever as far as the backend code is concerned; it is used purely to inform
   frontend behavior such as widget choices."
   (int 30))
 
-(def ^:const ^Integer auto-list-cardinality-threshold
+(def ^Integer auto-list-cardinality-threshold
   "Fields with less than this many distincy values should be given a `has_field_values` value of `list`, which means
   the Field should have FieldValues."
   (int 100))
 
-(def ^:private ^:const ^Integer entry-max-length
+(def ^:private ^Integer entry-max-length
   "The maximum character length for a stored `FieldValues` entry."
   (int 100))
 
-(def ^:private ^:const ^Integer total-max-length
+(def ^:private ^Integer total-max-length
   "Maximum total length for a `FieldValues` entry (combined length of all values for the field)."
   (int (* auto-list-cardinality-threshold entry-max-length)))
 
@@ -63,10 +64,10 @@
   (let [total-length (reduce + (map (comp count str)
                                     distinct-values))]
     (u/prog1 (<= total-length total-max-length)
-      (log/debug (format "Field values total length is %d (max %d)." total-length total-max-length)
+      (log/debug (trs "Field values total length is {0} (max {1})." total-length total-max-length)
                  (if <>
-                   "FieldValues are allowed for this Field."
-                   "FieldValues are NOT allowed for this Field.")))))
+                   (trs "FieldValues are allowed for this Field.")
+                   (trs "FieldValues are NOT allowed for this Field."))))))
 
 
 (defn- distinct-values
@@ -88,8 +89,9 @@
       (map #(get orig-remappings % (str %)) new-values))))
 
 (defn create-or-update-field-values!
-  "Create or update the FieldValues object for `field`. If the FieldValues object already exists, then update values for
-   it; otherwise create a new FieldValues object with the newly fetched values."
+  "Create or update the FieldValues object for 'field`. If the FieldValues object already exists, then update values for
+   it; otherwise create a new FieldValues object with the newly fetched values. Returns whether the field values were
+   created/updated/deleted as a result of this call."
   [field & [human-readable-values]]
   (let [field-values (FieldValues :field_id (u/get-id field))
         values       (distinct-values field)
@@ -112,13 +114,16 @@
                   (trs "Switching Field to use a search widget instead."))
         (db/update! 'Field (u/get-id field) :has_field_values nil)
         (db/delete! FieldValues :field_id (u/get-id field)))
+
       ;; if the FieldValues object already exists then update values in it
       (and field-values values)
       (do
         (log/debug (trs "Storing updated FieldValues for Field {0}..." field-name))
         (db/update-non-nil-keys! FieldValues (u/get-id field-values)
           :values                values
-          :human_readable_values (fixup-human-readable-values field-values values)))
+          :human_readable_values (fixup-human-readable-values field-values values))
+        ::fv-updated)
+
       ;; if FieldValues object doesn't exist create one
       values
       (do
@@ -126,10 +131,14 @@
         (db/insert! FieldValues
           :field_id              (u/get-id field)
           :values                values
-          :human_readable_values human-readable-values))
+          :human_readable_values human-readable-values)
+        ::fv-created)
+
       ;; otherwise this Field isn't eligible, so delete any FieldValues that might exist
       :else
-      (db/delete! FieldValues :field_id (u/get-id field)))))
+      (do
+        (db/delete! FieldValues :field_id (u/get-id field))
+        ::fv-deleted))))
 
 
 (defn field-values->pairs
@@ -148,7 +157,8 @@
   {:pre [(integer? field-id)]}
   (when (field-should-have-field-values? field)
     (or (FieldValues :field_id field-id)
-        (create-or-update-field-values! field human-readable-values))))
+        (when (contains? #{::fv-created ::fv-updated} (create-or-update-field-values! field human-readable-values))
+          (FieldValues :field_id field-id)))))
 
 (defn save-field-values!
   "Save the `FieldValues` for FIELD-ID, creating them if needed, otherwise updating them."
@@ -191,6 +201,6 @@
     (doseq [{table-id :table_id, :as field} fields]
       (when (table-id->is-on-demand? table-id)
         (log/debug
-         (format "Field %d '%s' should have FieldValues and belongs to a Database with On-Demand FieldValues updating."
+         (trs "Field {0} ''{1}'' should have FieldValues and belongs to a Database with On-Demand FieldValues updating."
                  (u/get-id field) (:name field)))
         (create-or-update-field-values! field)))))
